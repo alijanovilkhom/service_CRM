@@ -1,0 +1,11 @@
+.next
+node_modules
+.env*.local
+*.db
+*.db-wal
+*.db-shm
+out
+dist
+.DS_Store
+uploads
+next-env.d.ts
