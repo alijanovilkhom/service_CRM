@@ -1,14 +1,28 @@
 import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
+import { hashPassword } from "@/lib/auth";
 
 function resolveDbUrl(): string {
-  const url = process.env.TURSO_DATABASE_URL ?? "file:crm.db";
-  if (url.startsWith("file:") && !url.startsWith("file:///")) {
-    const rel = url.slice("file:".length);
+  const url = process.env.TURSO_DATABASE_URL ?? "";
+  const isProd = Boolean(process.env.VERCEL) || process.env.NODE_ENV === "production";
+
+  if (isProd) {
+    if (!url.startsWith("libsql:") && !url.startsWith("https:")) {
+      throw new Error("TURSO_DATABASE_URL must be a Turso URL (libsql://...) on Vercel");
+    }
+    if (!process.env.TURSO_AUTH_TOKEN) {
+      throw new Error("TURSO_AUTH_TOKEN is required on Vercel");
+    }
+    return url;
+  }
+
+  const localUrl = url || "file:crm.db";
+  if (localUrl.startsWith("file:") && !localUrl.startsWith("file:///")) {
+    const rel = localUrl.slice("file:".length);
     const abs = path.resolve(/* turbopackIgnore: true */ process.cwd(), rel);
     return `file:///${abs.replace(/\\/g, "/")}`;
   }
-  return url;
+  return localUrl;
 }
 
 let client: Client | null = null;
@@ -99,6 +113,7 @@ export async function ensureSchema(): Promise<void> {
           // колонка уже есть
         }
       }
+      await ensureAdmin(db);
     })();
   }
   await schemaPromise;
@@ -107,4 +122,23 @@ export async function ensureSchema(): Promise<void> {
 export async function getDb(): Promise<Client> {
   await ensureSchema();
   return getTurso();
+}
+
+async function ensureAdmin(db: Client) {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email || !password) return;
+
+  const existing = await db.execute({
+    sql: "select id from users where email = ?",
+    args: [email],
+  });
+  if (existing.rows.length > 0) return;
+
+  const name = process.env.ADMIN_NAME?.trim() || "Администратор";
+  await db.execute({
+    sql: `insert into users (id, name, email, password_hash, role, is_active, created_at)
+          values (?, ?, ?, ?, 'admin', 1, ?)`,
+    args: [crypto.randomUUID(), name, email, await hashPassword(password), new Date().toISOString()],
+  });
 }

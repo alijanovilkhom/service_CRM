@@ -23,6 +23,13 @@ function LoginForm() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status >= 500) {
+          setError(
+            data.error ||
+              "Сервер не настроен. Добавьте переменные окружения в Vercel и сделайте Redeploy.",
+          );
+          return;
+        }
         setError(data.error || "неверный email или пароль");
         return;
       }
