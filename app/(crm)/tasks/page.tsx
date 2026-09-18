@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { TaskForm } from "@/components/forms/TaskForm";
 import { useSession } from "@/components/layout/SessionContext";
 import { TaskRow } from "@/components/tasks/TaskRow";
@@ -15,6 +15,13 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskWithRelations[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const onBadgeDelta = useCallback(
+    (delta: number) => {
+      setOverdueTasks((n) => Math.max(0, n + delta));
+    },
+    [setOverdueTasks],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -72,9 +79,7 @@ export default function TasksPage() {
                 key={task.id}
                 task={task}
                 user={user}
-                onBadgeDelta={(delta) => {
-                  setOverdueTasks((n) => Math.max(0, n + delta));
-                }}
+                onBadgeDelta={onBadgeDelta}
               />
             ))}
           </ul>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Check } from "lucide-react";
-import { useState } from "react";
+import { startTransition, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { formatDate, isOverdue } from "@/lib/utils";
 import type { SessionUser, TaskStatus, TaskWithRelations } from "@/types/crm.types";
 
@@ -26,39 +26,71 @@ export function TaskRow({
   onBadgeDelta: (delta: number) => void;
 }) {
   const [status, setStatus] = useState<TaskStatus>(task.status);
-  const [busy, setBusy] = useState(false);
+  const desiredRef = useRef<TaskStatus>(task.status);
+  const serverRef = useRef<TaskStatus>(task.status);
+  const flushingRef = useRef(false);
+
+  useEffect(() => {
+    setStatus(task.status);
+    desiredRef.current = task.status;
+    serverRef.current = task.status;
+  }, [task.status]);
 
   const done = status === "done";
   const overdue = isOverdue(task.due_date, status);
 
-  async function toggle() {
-    if (busy) return;
-    const previous = status;
-    const next: TaskStatus = previous === "done" ? "pending" : "done";
-    const wasBadge = affectsBadge(task.due_date, previous, task.assigned_to, user);
-    const willBadge = affectsBadge(task.due_date, next, task.assigned_to, user);
-
-    setStatus(next);
-    if (wasBadge !== willBadge) {
+  function applyBadge(from: TaskStatus, to: TaskStatus) {
+    const wasBadge = affectsBadge(task.due_date, from, task.assigned_to, user);
+    const willBadge = affectsBadge(task.due_date, to, task.assigned_to, user);
+    if (wasBadge === willBadge) return;
+    startTransition(() => {
       onBadgeDelta(willBadge ? 1 : -1);
-    }
+    });
+  }
 
-    setBusy(true);
+  async function flush() {
+    if (flushingRef.current) return;
+    flushingRef.current = true;
     try {
-      const res = await fetch(`/api/tasks/${task.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: next }),
-      });
-      if (!res.ok) throw new Error("fail");
-    } catch {
-      setStatus(previous);
-      if (wasBadge !== willBadge) {
-        onBadgeDelta(wasBadge ? 1 : -1);
+      while (desiredRef.current !== serverRef.current) {
+        const sending = desiredRef.current;
+        const res = await fetch(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: sending }),
+        });
+        if (!res.ok) throw new Error("fail");
+        serverRef.current = sending;
       }
+    } catch {
+      const from = desiredRef.current;
+      desiredRef.current = serverRef.current;
+      setStatus(serverRef.current);
+      applyBadge(from, serverRef.current);
     } finally {
-      setBusy(false);
+      flushingRef.current = false;
+      if (desiredRef.current !== serverRef.current) void flush();
     }
+  }
+
+  function toggle() {
+    const from = desiredRef.current;
+    const next: TaskStatus = from === "done" ? "pending" : "done";
+    desiredRef.current = next;
+    setStatus(next);
+    applyBadge(from, next);
+    void flush();
+  }
+
+  function onPointerToggle(e: PointerEvent<HTMLButtonElement>) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    toggle();
+  }
+
+  function onKeyToggle(e: MouseEvent<HTMLButtonElement>) {
+    if (e.detail !== 0) return;
+    toggle();
   }
 
   return (
@@ -66,17 +98,24 @@ export function TaskRow({
       <div className="flex items-center gap-3 px-4 py-3">
         <button
           type="button"
-          onClick={toggle}
+          onPointerDown={onPointerToggle}
+          onClick={onKeyToggle}
           aria-pressed={done}
-          className={`flex size-5 shrink-0 items-center justify-center rounded-md border ${
-            done ? "border-copper bg-copper text-white" : "border-line bg-white"
-          }`}
+          aria-label={done ? "Вернуть в работу" : "Отметить выполненной"}
+          className="flex size-8 shrink-0 items-center justify-center rounded-md"
         >
-          {done && <Check size={13} strokeWidth={3} />}
+          <span
+            className={`flex size-5 items-center justify-center rounded-md border ${
+              done ? "border-copper bg-copper text-white" : "border-line bg-white"
+            }`}
+          >
+            {done && <Check size={13} strokeWidth={3} />}
+          </span>
         </button>
         <button
           type="button"
-          onClick={toggle}
+          onPointerDown={onPointerToggle}
+          onClick={onKeyToggle}
           className="min-w-0 flex-1 cursor-pointer text-left"
         >
           <div className={done ? "text-muted line-through" : "font-medium"}>{task.title}</div>

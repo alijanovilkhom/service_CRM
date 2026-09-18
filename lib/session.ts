@@ -1,9 +1,20 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/constants";
-import { verifyToken } from "@/lib/auth";
+import { verifyToken, type JwtPayload } from "@/lib/auth";
 import { getDb } from "@/lib/turso";
 import { mapUserRow, toSessionUser, USER_PUBLIC_COLUMNS } from "@/lib/users";
 import type { SessionUser } from "@/types/crm.types";
+
+export async function getJwtSession(): Promise<JwtPayload | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+  try {
+    return await verifyToken(token);
+  } catch {
+    return null;
+  }
+}
 
 export async function getSessionUser(): Promise<SessionUser | null> {
   const cookieStore = await cookies();

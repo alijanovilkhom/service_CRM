@@ -1,9 +1,20 @@
 import { NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/session";
-import type { SessionUser } from "@/types/crm.types";
+import { getJwtSession, getSessionUser } from "@/lib/session";
+import type { SessionUser, UserRole } from "@/types/crm.types";
 
 export function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+export async function requireJwtUser(): Promise<
+  | { user: { id: string; role: UserRole }; error?: undefined }
+  | { user?: undefined; error: NextResponse }
+> {
+  const session = await getJwtSession();
+  if (!session) {
+    return { error: jsonError("Необходима авторизация", 401) };
+  }
+  return { user: { id: session.userId, role: session.role } };
 }
 
 export async function requireUser(): Promise<

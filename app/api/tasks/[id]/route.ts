@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/turso";
-import { jsonError, requireUser } from "@/lib/api";
+import { jsonError, requireJwtUser, requireUser } from "@/lib/api";
 import type { LeadStatus, TaskStatus } from "@/types/crm.types";
 
 const TASK_SELECT = `select t.*,
@@ -33,10 +33,43 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await context.params;
+
+  let body: { status?: TaskStatus; due_date?: string | null; title?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonError("Некорректное тело запроса", 400);
+  }
+
+  if (
+    body.status !== undefined &&
+    body.due_date === undefined &&
+    body.title === undefined
+  ) {
+    if (body.status !== "pending" && body.status !== "done") {
+      return jsonError("Некорректный статус задачи", 400);
+    }
+
+    const auth = await requireJwtUser();
+    if (auth.error) return auth.error;
+
+    const db = await getDb();
+    const result = await db.execute({
+      sql: `update tasks set status = ?
+            where id = ?
+              and (? = 'admin' or assigned_to = ?)`,
+      args: [body.status, id, auth.user.role, auth.user.id],
+    });
+    if (result.rowsAffected === 0) {
+      return jsonError("Задача не найдена", 404);
+    }
+    return NextResponse.json({ ok: true, status: body.status });
+  }
+
   const auth = await requireUser();
   if (auth.error) return auth.error;
 
-  const { id } = await context.params;
   const db = await getDb();
   const existing = await db.execute({
     sql: "select * from tasks where id = ?",
@@ -47,13 +80,6 @@ export async function PATCH(
 
   if (auth.user.role !== "admin" && String(row.assigned_to) !== auth.user.id) {
     return jsonError("Недостаточно прав", 403);
-  }
-
-  let body: { status?: TaskStatus; due_date?: string | null; title?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return jsonError("Некорректное тело запроса", 400);
   }
 
   const fields: string[] = [];
